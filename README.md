@@ -18,10 +18,10 @@ A full-stack developer assistant platform that automates **legacy code moderniza
 
 ## Tech Stack
 
-| Layer     | Technology                          |
-|-----------|-------------------------------------|
-| Backend   | Python 3.11+, FastAPI, Uvicorn, Pydantic v2 |
-| Frontend  | Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS 3 |
+| Layer    | Technology                                                    |
+| -------- | ------------------------------------------------------------- |
+| Backend  | Python 3.11+, FastAPI, Uvicorn, Pydantic v2                   |
+| Frontend | Next.js 14 (App Router), React 18, TypeScript, Tailwind CSS 3 |
 
 ---
 
@@ -130,12 +130,13 @@ concurrently \
 
 Decompose a legacy monolith into microservice blueprints.
 
-| Field    | Type        | Description                          |
-|----------|-------------|--------------------------------------|
-| `code`   | form string | Raw source code to refactor          |
-| `file`   | file upload | Alternative: upload a source file    |
+| Field  | Type        | Description                       |
+| ------ | ----------- | --------------------------------- |
+| `code` | form string | Raw source code to refactor       |
+| `file` | file upload | Alternative: upload a source file |
 
 **Response** (`RefactorResponse`):
+
 ```json
 {
   "original_lines": 42,
@@ -158,11 +159,12 @@ Decompose a legacy monolith into microservice blueprints.
 Analyse a Terraform or Kubernetes manifest for security, cost, and reliability issues.
 
 | Field      | Type        | Description                              |
-|------------|-------------|------------------------------------------|
+| ---------- | ----------- | ---------------------------------------- |
 | `manifest` | form string | Raw `.tf` or YAML manifest text          |
 | `file`     | file upload | Alternative: upload a `.tf`/`.yaml` file |
 
 **Response** (`OptimizeResponse`):
+
 ```json
 {
   "manifest_type": "terraform",
@@ -209,10 +211,10 @@ Change this URL to point to a deployed backend in production.
 
 ## Dashboard Features
 
-| Tab | Feature |
-|-----|---------|
-| **Code Modernizer** | Paste or upload legacy code → side-by-side microservice blueprint view with module tabs |
-| **Cloud Optimizer** | Paste or upload Terraform/K8s YAML → health-score cards + detailed findings with line hints |
+| Tab                 | Feature                                                                                               |
+| ------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Code Modernizer** | Paste or upload legacy code → side-by-side microservice blueprint view with module tabs               |
+| **Cloud Optimizer** | Paste or upload Terraform/K8s YAML → health-score cards + detailed findings with line hints           |
 | **Onboarding Chat** | Keyword-aware chat assistant covering microservices, Terraform, Kubernetes, security, and cost topics |
 
 ---
