@@ -1,97 +1,166 @@
 "use client";
 
-/**
- * CodeModernizer – Tab 1
- *
- * Lets the user paste legacy code OR upload a file, sends it to
- * POST /api/refactor, and renders a side-by-side diff view of the
- * original vs the generated microservice blueprints.
- */
-
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
+import { useJobStore } from "@/store/jobStore";
+import type { MicroserviceBlueprint } from "@/store/jobStore";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-// ── Types ──────────────────────────────────────────────────────────────────
+// ── Skeleton ───────────────────────────────────────────────────────────────
 
-interface ModuleBlueprint {
-  name: string;
-  description: string;
-  suggested_language: string;
-  code_snippet: string;
+function CardSkeleton() {
+  return (
+    <div className="animate-pulse bg-gray-800 rounded-xl p-5 space-y-3 border border-gray-700">
+      <div className="h-5 bg-gray-700 rounded w-2/5" />
+      <div className="h-3 bg-gray-700 rounded w-4/5" />
+      <div className="h-3 bg-gray-700 rounded w-3/5" />
+      <div className="flex gap-2 pt-1">
+        <div className="h-5 bg-gray-700 rounded w-24" />
+        <div className="h-5 bg-gray-700 rounded w-20" />
+      </div>
+      <div className="h-28 bg-gray-700 rounded-lg w-full mt-2" />
+    </div>
+  );
 }
 
-interface RefactorResponse {
-  original_lines: number;
-  modules: ModuleBlueprint[];
-  summary: string;
+// ── Code block with copy button ────────────────────────────────────────────
+
+function CodeBlock({ code, language }: { code: string; language: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="rounded-lg overflow-hidden border border-gray-700">
+      <div className="flex items-center justify-between bg-gray-800 px-4 py-2">
+        <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+          {language}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="text-xs text-gray-400 hover:text-white transition-colors"
+        >
+          {copied ? "Copied!" : "Copy to Clipboard"}
+        </button>
+      </div>
+      <SyntaxHighlighter
+        language={language}
+        style={vscDarkPlus}
+        customStyle={{ margin: 0, borderRadius: 0, fontSize: "0.75rem" }}
+        wrapLongLines
+      >
+        {code}
+      </SyntaxHighlighter>
+    </div>
+  );
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Blueprint card ─────────────────────────────────────────────────────────
 
-const PLACEHOLDER_CODE = `# Example: monolithic Flask app
-from flask import Flask, request, jsonify
-import sqlite3, smtplib, hashlib
+function BlueprintCard({ blueprint }: { blueprint: MicroserviceBlueprint }) {
+  const [expanded, setExpanded] = useState(false);
 
-app = Flask(__name__)
+  const codeLanguage = blueprint.language ?? "yaml";
 
-@app.route('/register', methods=['POST'])
-def register():
-    data = request.json
-    conn = sqlite3.connect('users.db')
-    pw_hash = hashlib.sha256(data['password'].encode()).hexdigest()
-    conn.execute("INSERT INTO users VALUES (?,?)", (data['email'], pw_hash))
-    conn.commit()
-    smtplib.SMTP('smtp.example.com').sendmail('no-reply@example.com', data['email'], 'Welcome!')
-    return jsonify({'status': 'ok'})
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded((prev) => !prev)}
+        className="w-full text-left px-5 py-4 flex items-start justify-between gap-4 hover:bg-gray-750 transition-colors"
+      >
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-white text-sm truncate">
+            {blueprint.service_name}
+          </h3>
+          <p className="text-gray-400 text-xs mt-1 line-clamp-2">
+            {blueprint.description}
+          </p>
+        </div>
+        <span className="text-gray-500 text-lg leading-none mt-0.5 flex-shrink-0">
+          {expanded ? "−" : "+"}
+        </span>
+      </button>
 
-@app.route('/data', methods=['GET'])
-def get_data():
-    conn = sqlite3.connect('data.db')
-    rows = conn.execute("SELECT * FROM records").fetchall()
-    return jsonify(rows)
+      {expanded && (
+        <div className="px-5 pb-5 space-y-4 border-t border-gray-700">
+          {blueprint.original_files_referenced.length > 0 && (
+            <div className="pt-4">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">
+                Referenced Files
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {blueprint.original_files_referenced.map((file) => (
+                  <span
+                    key={file}
+                    className="font-mono text-xs bg-gray-900 text-green-400 border border-gray-700 rounded px-2 py-0.5"
+                  >
+                    {file}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
-if __name__ == '__main__':
-    app.run(debug=True)
-`;
+          {blueprint.openapi_spec && (
+            <div>
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">
+                OpenAPI Spec
+              </p>
+              <CodeBlock code={blueprint.openapi_spec} language="yaml" />
+            </div>
+          )}
 
-// ── Component ──────────────────────────────────────────────────────────────
+          {blueprint.code_snippet && (
+            <div>
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">
+                Code Snippet
+              </p>
+              <CodeBlock code={blueprint.code_snippet} language={codeLanguage} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main component ─────────────────────────────────────────────────────────
 
 export default function CodeModernizer() {
-  const [code, setCode] = useState(PLACEHOLDER_CODE);
-  const [result, setResult] = useState<RefactorResponse | null>(null);
+  const job_id = useJobStore((s) => s.job_id);
+  const job_status = useJobStore((s) => s.job_status);
+  const modernizer_artifacts = useJobStore((s) => s.modernizer_artifacts);
+  const setModernizerArtifacts = useJobStore((s) => s.setModernizerArtifacts);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeModule, setActiveModule] = useState(0);
-  const fileRef = useRef<HTMLInputElement>(null);
 
-  async function handleRefactor() {
+  async function handleModernize() {
+    if (!job_id) return;
     setLoading(true);
     setError(null);
-    setResult(null);
 
     try {
-      const fd = new FormData();
-      const fileInput = fileRef.current;
-      if (fileInput?.files?.[0]) {
-        fd.append("file", fileInput.files[0]);
-      } else {
-        fd.append("code", code);
-      }
-
-      const res = await fetch(`${API_BASE}/api/refactor`, {
+      const res = await fetch(`${API_BASE}/api/modernize`, {
         method: "POST",
-        body: fd,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id }),
       });
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.detail ?? "Refactor request failed");
+        throw new Error(err.detail ?? "Modernize request failed");
       }
 
-      const data: RefactorResponse = await res.json();
-      setResult(data);
-      setActiveModule(0);
+      const data: { microservices: MicroserviceBlueprint[] } = await res.json();
+      setModernizerArtifacts(data.microservices ?? []);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -99,113 +168,57 @@ export default function CodeModernizer() {
     }
   }
 
+  const isProcessing = job_status === "PROCESSING";
+
   return (
     <div className="space-y-6">
-      {/* ── Section header ── */}
       <div>
-        <h2 className="text-lg font-semibold">Code Modernizer</h2>
+        <h2 className="text-lg font-semibold text-white">Code Modernizer</h2>
         <p className="text-sm text-gray-400 mt-1">
-          Paste your legacy code or upload a source file. The AI will decompose
-          it into independent microservice blueprints.
+          Generate microservice blueprints from your ingested repository.
         </p>
       </div>
 
-      {/* ── Input + diff layout ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left: Input */}
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-              Legacy Code
-            </span>
-            <label className="cursor-pointer text-xs text-blue-400 hover:underline">
-              Upload file
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".py,.js,.ts,.java,.go,.rb,.php,.cs,.cpp,.c"
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files?.[0]) setCode(`[File selected: ${e.target.files[0].name}]`);
-                }}
-              />
-            </label>
-          </div>
-          <textarea
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            rows={20}
-            spellCheck={false}
-            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm font-mono text-gray-200 resize-none focus:outline-none focus:border-blue-600"
-          />
-          <button
-            onClick={handleRefactor}
-            disabled={loading}
-            className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition-colors"
-          >
-            {loading ? "Analysing…" : "⚙️ Refactor to Microservices"}
-          </button>
-          {error && (
-            <p className="text-red-400 text-sm bg-red-950 border border-red-800 rounded-lg px-3 py-2">
-              {error}
-            </p>
-          )}
+      {!job_id ? (
+        <div className="bg-yellow-950 border border-yellow-800 rounded-xl px-5 py-4 text-yellow-300 text-sm">
+          Complete repository ingestion first to unlock the Code Modernizer.
         </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleModernize}
+              disabled={loading || isProcessing}
+              className="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition-colors text-white"
+            >
+              {loading ? "Generating…" : "Generate Blueprints"}
+            </button>
+            {error && (
+              <p className="text-red-400 text-sm bg-red-950 border border-red-800 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
+          </div>
 
-        {/* Right: Output */}
-        <div className="flex flex-col gap-3">
-          <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-            Microservice Blueprints
-          </span>
-
-          {result ? (
-            <>
-              {/* Summary banner */}
-              <div className="bg-blue-950 border border-blue-800 rounded-lg px-4 py-3 text-sm text-blue-200">
-                {result.summary}
-              </div>
-
-              {/* Module tabs */}
-              <div className="flex gap-2 flex-wrap">
-                {result.modules.map((mod, idx) => (
-                  <button
-                    key={mod.name}
-                    onClick={() => setActiveModule(idx)}
-                    className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                      activeModule === idx
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-800 text-gray-300 hover:bg-gray-700"
-                    }`}
-                  >
-                    {mod.name}
-                  </button>
-                ))}
-              </div>
-
-              {/* Module detail */}
-              {result.modules[activeModule] && (
-                <div className="flex flex-col gap-2">
-                  <div className="bg-gray-800 rounded-lg px-4 py-3 text-sm">
-                    <p className="text-gray-400 mb-1">
-                      {result.modules[activeModule].description}
-                    </p>
-                    <span className="text-xs text-green-400">
-                      🛠 {result.modules[activeModule].suggested_language}
-                    </span>
-                  </div>
-                  <pre className="bg-gray-900 border border-gray-700 rounded-lg p-4 text-xs text-green-300 font-mono overflow-auto max-h-80 whitespace-pre-wrap">
-                    {result.modules[activeModule].code_snippet}
-                  </pre>
-                </div>
-              )}
-            </>
+          {isProcessing ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <CardSkeleton key={i} />
+              ))}
+            </div>
+          ) : modernizer_artifacts.length === 0 ? (
+            <div className="flex items-center justify-center bg-gray-800 border border-dashed border-gray-700 rounded-xl py-16 text-gray-500 text-sm">
+              No blueprints generated yet
+            </div>
           ) : (
-            <div className="flex-1 bg-gray-900 border border-dashed border-gray-700 rounded-lg flex items-center justify-center text-gray-600 text-sm min-h-[400px]">
-              Refactored blueprints will appear here
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {modernizer_artifacts.map((blueprint) => (
+                <BlueprintCard key={blueprint.service_name} blueprint={blueprint} />
+              ))}
             </div>
           )}
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 }

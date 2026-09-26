@@ -1,68 +1,48 @@
 "use client";
 
 import { useState } from "react";
+import Sidebar from "@/components/layout/Sidebar";
+import TopNav from "@/components/layout/TopNav";
+import IngestionPanel from "@/components/IngestionPanel";
 import CodeModernizer from "@/components/CodeModernizer";
 import CloudOptimizer from "@/components/CloudOptimizer";
 import OnboardingChat from "@/components/OnboardingChat";
 
-/** Tab definitions */
-const TABS = [
-  { id: "modernizer", label: "Code Modernizer", icon: "⚙️" },
-  { id: "cloud", label: "Cloud Optimizer", icon: "☁️" },
-  { id: "chat", label: "Onboarding Chat", icon: "💬" },
-] as const;
+type ViewId = "setup" | "modernizer" | "cloud" | "chat";
 
-type TabId = (typeof TABS)[number]["id"];
+const VIEW_TITLES: Record<ViewId, string> = {
+  setup: "Project Setup",
+  modernizer: "Code Modernizer",
+  cloud: "Cloud Optimizer",
+  chat: "Onboarding Chat",
+};
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<TabId>("modernizer");
+  const [activeView, setActiveView] = useState<ViewId>("setup");
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* ── Header ── */}
-      <header className="border-b border-gray-800 bg-gray-900 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center gap-3">
-          <span className="text-2xl">🏗️</span>
-          <h1 className="text-xl font-semibold tracking-tight">
-            ArchModernizer <span className="text-blue-400">AI</span>
-          </h1>
-          <span className="ml-auto text-xs text-gray-500">
-            Powered by FastAPI + Next.js
-          </span>
-        </div>
-      </header>
+    <div className="flex min-h-screen">
+      {/* ── Sidebar ── */}
+      <Sidebar
+        activeView={activeView}
+        onNavigate={(view) => setActiveView(view as ViewId)}
+      />
 
-      {/* ── Tab bar ── */}
-      <nav className="bg-gray-900 border-b border-gray-800 px-6">
-        <div className="max-w-7xl mx-auto flex gap-1">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
-                activeTab === tab.id
-                  ? "border-blue-500 text-blue-400"
-                  : "border-transparent text-gray-400 hover:text-gray-200"
-              }`}
-            >
-              <span className="mr-2">{tab.icon}</span>
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </nav>
+      {/* ── Main area ── */}
+      <div className="flex flex-col flex-1 min-w-0">
+        <TopNav title={VIEW_TITLES[activeView]} />
 
-      {/* ── Tab content ── */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-8">
-        {activeTab === "modernizer" && <CodeModernizer />}
-        {activeTab === "cloud" && <CloudOptimizer />}
-        {activeTab === "chat" && <OnboardingChat />}
-      </main>
+        <main className="flex-1 px-6 py-8 overflow-auto">
+          {activeView === "setup" && <IngestionPanel />}
+          {activeView === "modernizer" && <CodeModernizer />}
+          {activeView === "cloud" && <CloudOptimizer />}
+          {activeView === "chat" && <OnboardingChat />}
+        </main>
 
-      {/* ── Footer ── */}
-      <footer className="border-t border-gray-800 bg-gray-900 py-3 text-center text-xs text-gray-600">
-        ArchModernizer AI — IBM Bob 2.0 demo
-      </footer>
+        <footer className="border-t border-gray-800 bg-gray-900 py-3 text-center text-xs text-gray-600">
+          ArchModernizer AI — IBM Bob 2.0 demo
+        </footer>
+      </div>
     </div>
   );
 }

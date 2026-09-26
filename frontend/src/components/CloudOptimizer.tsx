@@ -1,268 +1,253 @@
 "use client";
 
-/**
- * CloudOptimizer – Tab 2
- *
- * Accepts Terraform (.tf) or Kubernetes YAML as a text input or file upload,
- * sends it to POST /api/optimize, and renders the findings as metric cards
- * and a detailed finding list.
- */
+import { useEffect, useState } from "react";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
+import { useJobStore } from "@/store/jobStore";
+import type { CloudFinding, CloudScanResult } from "@/store/jobStore";
 
-import { useRef, useState } from "react";
+// ── Skeleton ───────────────────────────────────────────────────────────────
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
-interface OptimizationFinding {
-  severity: "critical" | "warning" | "info";
-  category: string;
-  description: string;
-  recommendation: string;
-  line_hint?: number;
+function MetricCardSkeleton() {
+  return (
+    <div className="animate-pulse rounded-xl bg-gray-800 p-5 flex flex-col gap-3">
+      <div className="h-3 w-24 rounded bg-gray-700" />
+      <div className="h-8 w-12 rounded bg-gray-700" />
+    </div>
+  );
 }
 
-interface OptimizeResponse {
-  manifest_type: string;
-  total_findings: number;
-  critical_count: number;
-  warning_count: number;
-  info_count: number;
-  findings: OptimizationFinding[];
-  overall_score: number;
+function FindingCardSkeleton() {
+  return (
+    <div className="animate-pulse rounded-xl bg-gray-800 border border-gray-700 p-5 flex flex-col gap-3">
+      <div className="flex items-center gap-3">
+        <div className="h-5 w-14 rounded-full bg-gray-700" />
+        <div className="h-4 w-32 rounded bg-gray-700" />
+      </div>
+      <div className="h-4 w-3/4 rounded bg-gray-700" />
+      <div className="h-4 w-1/2 rounded bg-gray-700" />
+      <div className="h-24 rounded-lg bg-gray-700" />
+    </div>
+  );
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-const PLACEHOLDER_MANIFEST = `# Example Terraform with intentional issues
-provider "aws" {
-  region = "us-east-1"
+function LoadingSkeletons() {
+  return (
+    <div className="flex flex-col gap-8">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <MetricCardSkeleton key={i} />
+        ))}
+      </div>
+      <div className="flex flex-col gap-4">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <FindingCardSkeleton key={i} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
-resource "aws_db_instance" "prod_db" {
-  engine               = "mysql"
-  instance_class       = "t2.micro"
-  publicly_accessible  = true
-  skip_final_snapshot  = true
-  username             = "admin"
-  password             = "hunter2"
+// ── Metric card ────────────────────────────────────────────────────────────
+
+interface MetricCardProps {
+  label: string;
+  value: number | string;
+  accent: string;
 }
 
-resource "aws_security_group" "allow_all" {
-  name = "allow_all"
-  ingress {
-    from_port   = 0
-    to_port     = 65535
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+function MetricCard({ label, value, accent }: MetricCardProps) {
+  return (
+    <div className="rounded-xl bg-gray-800 border border-gray-700 p-5 flex flex-col gap-1">
+      <span className={`text-xs font-semibold uppercase tracking-wider ${accent}`}>
+        {label}
+      </span>
+      <span className="text-3xl font-bold text-white">{value}</span>
+    </div>
+  );
+}
+
+// ── Finding card ───────────────────────────────────────────────────────────
+
+const severityStyles: Record<CloudFinding["severity"], string> = {
+  HIGH: "border-red-500 bg-red-50/10",
+  MEDIUM: "border-yellow-500 bg-yellow-50/10",
+  LOW: "border-blue-500 bg-blue-50/10",
+};
+
+const severityTextStyles: Record<CloudFinding["severity"], string> = {
+  HIGH: "text-red-400",
+  MEDIUM: "text-yellow-400",
+  LOW: "text-blue-400",
+};
+
+function FindingCard({ finding }: { finding: CloudFinding }) {
+  const [copied, setCopied] = useState(false);
+  const [showFix, setShowFix] = useState(false);
+
+  function handleCopy() {
+    if (!finding.suggested_fix) return;
+    navigator.clipboard.writeText(finding.suggested_fix).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   }
+
+  return (
+    <div
+      className={`rounded-xl border p-5 flex flex-col gap-3 ${severityStyles[finding.severity]}`}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={`text-xs font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${severityTextStyles[finding.severity]} border-current`}
+        >
+          {finding.severity}
+        </span>
+        <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+          {finding.category}
+        </span>
+        <span className="text-sm font-semibold text-white ml-auto">
+          {finding.issue_type}
+        </span>
+      </div>
+
+      <p className="text-sm text-gray-300 leading-relaxed">{finding.description}</p>
+
+      {finding.suggested_fix && (
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => setShowFix((v) => !v)}
+            className="self-start text-xs font-medium text-gray-400 hover:text-white transition-colors underline underline-offset-2"
+          >
+            {showFix ? "Hide" : "Show"} Suggested Fix
+          </button>
+
+          {showFix && (
+            <div className="relative rounded-lg overflow-hidden">
+              <button
+                onClick={handleCopy}
+                className="absolute top-2 right-2 z-10 text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white transition-colors"
+              >
+                {copied ? "Copied!" : "Copy Fix"}
+              </button>
+              <SyntaxHighlighter
+                language={finding.fix_language ?? "bash"}
+                style={vscDarkPlus}
+                customStyle={{ margin: 0, borderRadius: "0.5rem", fontSize: "0.8rem" }}
+                wrapLongLines
+              >
+                {finding.suggested_fix}
+              </SyntaxHighlighter>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
-`;
 
-const SEVERITY_STYLES: Record<string, string> = {
-  critical: "bg-red-950 border-red-700 text-red-300",
-  warning: "bg-yellow-950 border-yellow-700 text-yellow-300",
-  info: "bg-blue-950 border-blue-700 text-blue-300",
-};
-
-const SEVERITY_BADGE: Record<string, string> = {
-  critical: "bg-red-600 text-white",
-  warning: "bg-yellow-500 text-gray-900",
-  info: "bg-blue-600 text-white",
-};
-
-// ── Component ──────────────────────────────────────────────────────────────
+// ── Main component ─────────────────────────────────────────────────────────
 
 export default function CloudOptimizer() {
-  const [manifest, setManifest] = useState(PLACEHOLDER_MANIFEST);
-  const [result, setResult] = useState<OptimizeResponse | null>(null);
+  const job_id = useJobStore((s) => s.job_id);
+  const job_status = useJobStore((s) => s.job_status);
+  const cloud_artifacts = useJobStore((s) => s.cloud_artifacts);
+  const setCloudArtifacts = useJobStore((s) => s.setCloudArtifacts);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
-  async function handleOptimize() {
+  useEffect(() => {
+    if (!job_id || job_status === "PROCESSING") return;
+    if (cloud_artifacts) return;
+
     setLoading(true);
     setError(null);
-    setResult(null);
 
-    try {
-      const fd = new FormData();
-      const fileInput = fileRef.current;
-      if (fileInput?.files?.[0]) {
-        fd.append("file", fileInput.files[0]);
-      } else {
-        fd.append("manifest", manifest);
-      }
+    fetch("/api/cloud-optimize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Server responded ${res.status}`);
+        return res.json() as Promise<CloudScanResult>;
+      })
+      .then((data) => {
+        setCloudArtifacts(data);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Failed to load cloud scan results.");
+      })
+      .finally(() => setLoading(false));
+  }, [job_id, job_status, cloud_artifacts, setCloudArtifacts]);
 
-      const res = await fetch(`${API_BASE}/api/optimize`, {
-        method: "POST",
-        body: fd,
-      });
+  // ── Guardrail: no job yet ──────────────────────────────────────────────
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail ?? "Optimize request failed");
-      }
-
-      const data: OptimizeResponse = await res.json();
-      setResult(data);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
+  if (!job_id) {
+    return (
+      <div className="rounded-xl border border-gray-700 bg-gray-800 p-6 text-center text-gray-400 text-sm">
+        Complete repository ingestion first to unlock Cloud Optimizer.
+      </div>
+    );
   }
 
-  // Score colour
-  const scoreColor =
-    result && result.overall_score >= 80
+  // ── Guardrail: job still processing ───────────────────────────────────
+
+  if (job_status === "PROCESSING" || loading) {
+    return <LoadingSkeletons />;
+  }
+
+  // ── Error state ────────────────────────────────────────────────────────
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-red-700 bg-red-900/20 p-6 text-center text-red-400 text-sm">
+        {error}
+      </div>
+    );
+  }
+
+  // ── No data yet ────────────────────────────────────────────────────────
+
+  if (!cloud_artifacts) return null;
+
+  const { security_count, cost_count, performance_count, health_score, findings } =
+    cloud_artifacts;
+
+  const healthColor =
+    health_score >= 80
       ? "text-green-400"
-      : result && result.overall_score >= 50
+      : health_score >= 50
       ? "text-yellow-400"
       : "text-red-400";
 
   return (
-    <div className="space-y-6">
-      {/* ── Header ── */}
-      <div>
-        <h2 className="text-lg font-semibold">Cloud Optimizer</h2>
-        <p className="text-sm text-gray-400 mt-1">
-          Paste a Terraform config or Kubernetes YAML manifest. The analyser
-          will flag security risks, cost inefficiencies, and reliability gaps.
-        </p>
+    <div className="flex flex-col gap-8">
+      {/* Metric cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <MetricCard label="Security" value={security_count} accent="text-red-400" />
+        <MetricCard label="Cost" value={cost_count} accent="text-yellow-400" />
+        <MetricCard label="Performance" value={performance_count} accent="text-blue-400" />
+        <MetricCard
+          label="Health Score"
+          value={`${health_score}%`}
+          accent={healthColor}
+        />
       </div>
 
-      {/* ── Metric cards (shown after analysis) ── */}
-      {result && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {[
-            {
-              label: "Health Score",
-              value: `${result.overall_score}/100`,
-              cls: scoreColor,
-            },
-            {
-              label: "Critical",
-              value: result.critical_count,
-              cls: "text-red-400",
-            },
-            {
-              label: "Warnings",
-              value: result.warning_count,
-              cls: "text-yellow-400",
-            },
-            {
-              label: "Info",
-              value: result.info_count,
-              cls: "text-blue-400",
-            },
-          ].map((card) => (
-            <div
-              key={card.label}
-              className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center"
-            >
-              <div className={`text-3xl font-bold ${card.cls}`}>
-                {card.value}
-              </div>
-              <div className="text-xs text-gray-500 mt-1 uppercase tracking-wider">
-                {card.label}
-              </div>
-            </div>
+      {/* Vulnerability feed */}
+      {findings.length === 0 ? (
+        <p className="text-sm text-gray-500 text-center py-8">
+          No findings — your cloud configuration looks clean.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {findings.map((finding) => (
+            <FindingCard key={finding.id} finding={finding} />
           ))}
         </div>
       )}
-
-      {/* ── Input + findings layout ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Left: Input */}
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-              Manifest Input
-            </span>
-            <label className="cursor-pointer text-xs text-blue-400 hover:underline">
-              Upload file
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".tf,.yaml,.yml"
-                className="hidden"
-                onChange={(e) => {
-                  if (e.target.files?.[0])
-                    setManifest(`[File selected: ${e.target.files[0].name}]`);
-                }}
-              />
-            </label>
-          </div>
-          <textarea
-            value={manifest}
-            onChange={(e) => setManifest(e.target.value)}
-            rows={20}
-            spellCheck={false}
-            className="w-full bg-gray-900 border border-gray-700 rounded-lg p-4 text-sm font-mono text-gray-200 resize-none focus:outline-none focus:border-blue-600"
-          />
-          <button
-            onClick={handleOptimize}
-            disabled={loading}
-            className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-sm font-medium transition-colors"
-          >
-            {loading ? "Analysing…" : "☁️ Analyse Manifest"}
-          </button>
-          {error && (
-            <p className="text-red-400 text-sm bg-red-950 border border-red-800 rounded-lg px-3 py-2">
-              {error}
-            </p>
-          )}
-        </div>
-
-        {/* Right: Findings */}
-        <div className="flex flex-col gap-3">
-          <span className="text-xs font-medium text-gray-400 uppercase tracking-wider">
-            Findings{" "}
-            {result && (
-              <span className="ml-1 text-gray-500">
-                ({result.manifest_type.toUpperCase()} · {result.total_findings} finding
-                {result.total_findings !== 1 ? "s" : ""})
-              </span>
-            )}
-          </span>
-
-          {result && result.findings.length > 0 ? (
-            <div className="space-y-3 overflow-y-auto max-h-[520px] pr-1">
-              {result.findings.map((f, i) => (
-                <div
-                  key={i}
-                  className={`border rounded-lg px-4 py-3 text-sm ${SEVERITY_STYLES[f.severity] ?? "bg-gray-800 border-gray-700 text-gray-300"}`}
-                >
-                  <div className="flex items-start justify-between gap-2 mb-1">
-                    <span
-                      className={`text-xs font-semibold px-2 py-0.5 rounded uppercase ${SEVERITY_BADGE[f.severity]}`}
-                    >
-                      {f.severity}
-                    </span>
-                    <span className="text-xs text-gray-500 capitalize">
-                      {f.category}
-                      {f.line_hint ? ` · line ${f.line_hint}` : ""}
-                    </span>
-                  </div>
-                  <p className="font-medium">{f.description}</p>
-                  <p className="mt-1 text-xs opacity-75">
-                    💡 {f.recommendation}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : result && result.findings.length === 0 ? (
-            <div className="flex-1 bg-green-950 border border-green-700 rounded-lg flex items-center justify-center text-green-400 text-sm min-h-[200px]">
-              ✅ No issues found — manifest looks clean!
-            </div>
-          ) : (
-            <div className="flex-1 bg-gray-900 border border-dashed border-gray-700 rounded-lg flex items-center justify-center text-gray-600 text-sm min-h-[400px]">
-              Analysis findings will appear here
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
